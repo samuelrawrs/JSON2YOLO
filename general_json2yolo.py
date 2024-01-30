@@ -3,6 +3,7 @@ import json
 
 import cv2
 import pandas as pd
+import yaml
 from PIL import Image
 from collections import defaultdict
 from pycocotools import mask
@@ -511,8 +512,142 @@ def delete_dsstore(path='../datasets'):
         f.unlink()
 
 
+def convert_hasty_coco_json(json_file, images_dir='../coco/images/', output_dir='output_dir', use_segments=False,
+                            use_keypoints=False, cls91to80=False):
+    # Check for 'train' and 'val' subdirectories in the images directory
+    train_dir = Path(images_dir) / 'train'
+    val_dir = Path(images_dir) / 'val'
+    if not train_dir.exists() or not val_dir.exists():
+        raise ValueError("Both 'train' and 'val' directories must exist within the specified images directory.")
+
+    save_dir = Path(output_dir)  # Base directory for labels
+    yolo_images = save_dir / 'images'
+
+    copy_all_files(train_dir, yolo_images / 'train')
+    copy_all_files(val_dir, yolo_images / 'val')
+
+    coco80 = coco91_to_coco80_class()
+
+    # Import json
+    with open(json_file) as f:
+        data = json.load(f)
+    category_names = {category['id']: category['name'] for category in data['categories']}
+
+    # Create yaml file based on category names
+    yaml_path = save_dir / (save_dir.name + '.yaml')
+    create_yaml_file(yaml_path, category_names)
+
+    # Create image dict
+    images = {'%g' % x['id']: x for x in data['images']}
+    # Create image-annotations dict
+    imgToAnns = defaultdict(list)
+    for ann in data['annotations']:
+        imgToAnns[ann['image_id']].append(ann)
+
+    if use_keypoints:
+        show_kpt_shape_flip_idx(data)
+
+    # Write labels file
+    for img_id, anns in tqdm(imgToAnns.items(), desc=f'Annotations {json_file}'):
+        img = images['%g' % img_id]
+        h, w, f = img['height'], img['width'], img['file_name']
+        f = f.split('/')[-1]
+
+        bboxes = []
+        segments = []
+        keypoints = []
+        for ann in anns:
+            # The COCO box format is [top left x, top left y, width, height]
+            if len(ann['bbox']) == 0:
+                box = bbox_from_keypoints(ann)
+            else:
+                box = np.array(ann['bbox'], dtype=np.float64)
+            box[:2] += box[2:] / 2  # xy top-left corner to center
+            box[[0, 2]] /= w  # normalize x
+            box[[1, 3]] /= h  # normalize y
+            if box[2] <= 0 or box[3] <= 0:  # if w <= 0 and h <= 0
+                continue
+
+            cls = coco80[ann['category_id'] - 1] if cls91to80 else ann['category_id'] - 1  # class
+            box = [cls] + box.tolist()
+            if box not in bboxes:
+                bboxes.append(box)
+            if use_segments:
+                if len(ann['segmentation']) == 0:
+                    segments.append([])
+                    continue
+                if isinstance(ann['segmentation'], dict):
+                    ann['segmentation'] = rle2polygon(ann['segmentation'])
+                if len(ann['segmentation']) > 1:
+                    s = merge_multi_segment(ann['segmentation'])
+                    s = (np.concatenate(s, axis=0) / np.array([w, h])).reshape(-1).tolist()
+                else:
+                    s = [j for i in ann['segmentation'] for j in i]  # all segments concatenated
+                    s = (np.array(s).reshape(-1, 2) / np.array([w, h])).reshape(-1).tolist()
+                s = [cls] + s
+                if s not in segments:
+                    segments.append(s)
+            if use_keypoints:
+                if 'keypoints' not in ann:
+                    keypoints.append([])
+                    continue
+                else:
+                    k = (np.array(ann['keypoints']).reshape(-1, 3) / np.array([w, h, 1])).reshape(-1).tolist()
+                    k = box + k
+                    keypoints.append(k)
+
+        # Determine if the image is in 'train' or 'val' directory
+        if (train_dir / f).exists():
+            label_subdir = 'train'
+        elif (val_dir / f).exists():
+            label_subdir = 'val'
+        else:
+            print(f"Image file {f} not found in 'train' or 'val' directories.")
+            continue  # Skip this image
+
+        fn = save_dir / 'labels' / label_subdir / f.split('.')[0]  # Adjusted path for label file
+        fn.parent.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+
+        # Write annotations to file
+        with open(fn.with_suffix('.txt'), 'a') as file:
+            for i in range(len(bboxes)):
+                if use_keypoints:
+                    line = *(keypoints[i]),  # cls, box, keypoints
+                else:
+                    line = *(segments[i] if use_segments and len(segments[i]) > 0 else bboxes[
+                        i]),  # cls, box or segments
+                file.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+
+def copy_all_files(src_dir, dst_dir):
+    os.makedirs(dst_dir, exist_ok=True)  # create output dir
+    files = os.listdir(src_dir)
+    for file_name in files:
+        src_file = os.path.join(src_dir, file_name)
+        dst_file = os.path.join(dst_dir, file_name)
+        if os.path.isfile(src_file):  # check if file or directory
+            shutil.copy(src_file, dst_file)
+
+
+def create_yaml_file(yaml_path, category_names):
+    yaml_content = {
+        "path": "",  # dataset root directory in ultralytics
+        "train": "images/train",  # Relative path to training images
+        "val": "images/val",  # Relative path to validation images
+        "test": "",  # Optional, path to test images
+        "names": {idx: name for idx, (_, name) in enumerate(sorted(category_names.items()))}
+    }
+
+    with open(yaml_path, 'w') as file:
+        yaml.dump(yaml_content, file, sort_keys=False, default_flow_style=False)
+
+
 if __name__ == '__main__':
     source = 'COCO'
+    source = 'hasty-coco'
+    json_file_dir = ""  # Directory containing your COCO annotations JSON file
+    image_directories = ""  # Define the directories containing your training and validation images
+    output_directory = "" # Define where the output folder should be
 
     if source == 'COCO':
         convert_coco_json('../datasets/coco/annotations',  # directory with *.json
@@ -532,6 +667,16 @@ if __name__ == '__main__':
 
     elif source == 'ath':  # ath format
         convert_ath_json(json_dir='../../Downloads/athena/')  # images folder
+
+    elif source == 'hasty-coco':
+        convert_hasty_coco_json(
+            json_file=json_file_dir,
+            images_dir=image_directories,
+            output_dir=output_directory,
+            use_segments=True,  # Set to True if you want to include segmentation data
+            use_keypoints=False,  # Set to True if you want to include keypoint data
+            cls91to80=False  # Set to True if you need to convert class IDs from COCO 91 to COCO 80
+        )
 
     # zip results
     # os.system('zip -r ../coco.zip ../coco')
