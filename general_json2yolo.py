@@ -1,4 +1,7 @@
+import argparse
 import json
+import subprocess
+
 import cv2
 import yaml
 from collections import defaultdict
@@ -18,6 +21,7 @@ def bbox_from_keypoints(ann):
         max(y_list) - min(y_list),
     ]
     return np.array(box, dtype=np.float64)
+
 
 def is_clockwise(contour):
     value = 0
@@ -167,9 +171,7 @@ def merge_multi_segment(segments):
 
 
 def convert_hasty_coco_json(
-    json_file,
-    images_dir="../coco/images/",
-    output_dir="output_dir",
+    json_file, images_dir="../coco/images/", output_dir="output_dir", keep_classes=None
 ):
     # Check for 'train' and 'val' subdirectories in the images directory
     train_dir = Path(images_dir) / "train"
@@ -179,17 +181,34 @@ def convert_hasty_coco_json(
             "Both 'train' and 'val' directories must exist within the specified images directory."
         )
 
+    # copying image files to ultralytics file structure
     save_dir = Path(output_dir)  # Base directory for labels
     yolo_images = save_dir / "images"
-
     copy_all_files(train_dir, yolo_images / "train")
     copy_all_files(val_dir, yolo_images / "val")
 
-    coco80 = coco91_to_coco80_class()
-
-    # Import json
+    # import json
     with open(json_file) as f:
         data = json.load(f)
+
+    # keep certain classes if keep_classes is defined
+    if keep_classes:
+        keep_classes = [
+            x + 1 for x in keep_classes
+        ]  # note: this is solely because the coco ids start from 1, while yolo ids start from 0
+        keep_classes_ids = set()
+        for category in data["categories"]:
+            if category["id"] in keep_classes:
+                keep_classes_ids.add(category["id"])
+
+        data["categories"] = [
+            cat for cat in data["categories"] if cat["id"] in keep_classes_ids
+        ]
+
+        data["annotations"] = [
+            ann for ann in data["annotations"] if ann["category_id"] in keep_classes_ids
+        ]
+
     category_names = {
         category["id"]: category["name"] for category in data["categories"]
     }
@@ -200,6 +219,7 @@ def convert_hasty_coco_json(
 
     # Create image dict
     images = {"%g" % x["id"]: x for x in data["images"]}
+
     # Create image-annotations dict
     imgToAnns = defaultdict(list)
     for ann in data["annotations"]:
@@ -213,7 +233,6 @@ def convert_hasty_coco_json(
 
         bboxes = []
         segments = []
-        keypoints = []
         for ann in anns:
             # The COCO box format is [top left x, top left y, width, height]
             if len(ann["bbox"]) == 0:
@@ -238,20 +257,12 @@ def convert_hasty_coco_json(
                 ann["segmentation"] = rle2polygon(ann["segmentation"])
             if len(ann["segmentation"]) > 1:
                 s = merge_multi_segment(ann["segmentation"])
-                s = (
-                    (np.concatenate(s, axis=0) / np.array([w, h]))
-                    .reshape(-1)
-                    .tolist()
-                )
+                s = (np.concatenate(s, axis=0) / np.array([w, h])).reshape(-1).tolist()
             else:
                 s = [
                     j for i in ann["segmentation"] for j in i
                 ]  # all segments concatenated
-                s = (
-                    (np.array(s).reshape(-1, 2) / np.array([w, h]))
-                    .reshape(-1)
-                    .tolist()
-                )
+                s = (np.array(s).reshape(-1, 2) / np.array([w, h])).reshape(-1).tolist()
             s = [cls] + s
             if s not in segments:
                 segments.append(s)
@@ -274,11 +285,7 @@ def convert_hasty_coco_json(
         with open(fn.with_suffix(".txt"), "a") as file:
             for i in range(len(bboxes)):
                 line = (
-                    *(
-                        segments[i]
-                        if len(segments[i]) > 0
-                        else bboxes[i]
-                    ),
+                    *(segments[i] if len(segments[i]) > 0 else bboxes[i]),
                 )  # cls, box or segments
                 file.write(("%g " * len(line)).rstrip() % line + "\n")
 
@@ -311,15 +318,72 @@ def create_yaml_file(yaml_path, category_names):
 if __name__ == '__main__':
     source = 'COCO'
     source = 'hasty-coco'
-if __name__ == "__main__":
-    json_file_dir = ""  # Directory containing your COCO annotations JSON file
-    image_directories = ""  # Define the directories containing your training and validation images
-    output_directory = ""  # Define where the output folder should be
+def create_zip_file(output_directory, remove_folder=False):
+    # zip and remove the folder if indicated
+    zip_file_path = Path(output_directory).with_suffix(".zip")
+    result = subprocess.run(["zip", "-r", zip_file_path, output_directory], check=True)
+    if remove_folder and result.returncode == 0:  # If the zip operation was successful
+        shutil.rmtree(Path(output_directory))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert Hasty COCO JSON files.")
+    parser.add_argument(
+        "--json_file", "-j", required=True, help="Path to the JSON Annotation file."
+    )
+    parser.add_argument(
+        "--images_dir", "-i", required=True, help="Directory containing the images."
+    )
+    parser.add_argument(
+        "--output_dir",
+        "-o",
+        required=True,
+        help="Output directory for the converted files.",
+    )
+
+    parser.add_argument(
+        "--keep-classes",
+        "-k",
+        required=False,
+        nargs="+",
+        type=int,
+        help="Enter a list of class ids to keep in the output file.",
+    )
+
+    parser.add_argument(
+        "--zip",
+        "-z",
+        required=False,
+        action="store_true",
+        help="Zip the output directory if this flag is present.",
+    )
+
+    # Refer to these integers for the corresponding classes
+    #   0: staple
+    #   1: 'Nail: Head+Body'
+    #   2: 'Nail: Head'
+    #   3: 'Nail: Body'
+    #   4: 'Wood: Face'
+    #   5: 'Wood: Split'
+    #   6: 'Metal: Other'
+    #   7: 'Nail: Cut-Off'
+    #   8: Hole
+
+    args = parser.parse_args()
 
     convert_hasty_coco_json(
-        json_file=json_file_dir,
-        images_dir=image_directories,
-        output_dir=output_directory,
+        json_file=args.json_file,
+        images_dir=args.images_dir,
+        output_dir=args.output_dir,
+        keep_classes=args.keep_classes,
     )
-    # os.system('zip -r ../coco.zip ../coco')
 
+    if args.zip:
+        create_zip_file(output_directory=args.output_dir)
+
+    # example usage to keep ids 0,1,2 and zip the folder:
+    # python3 general_json2yolo.py -j "/home/samuel/x.json" -i "/home/samuel/images" -o /home/samuel/output -k 0 1 2 -z
+
+
+if __name__ == "__main__":
+    main()
