@@ -1,34 +1,66 @@
-<img src="https://storage.googleapis.com/ultralytics/logo/logoname1000.png" width="160">
+# hasty.ai COCO2YOLO 
 
-# Introduction
+So you wanna convert your hasty.ai's COCO format to ultralytic's YOLO dataset format, you've come to the right place!
+This repository is based of the ultralytics JSON2YOLO repository but is customized for exporting from hasty.ai.
 
-This directory contains label import/export software developed by Ultralytics LLC, and **is freely available for redistribution under the GPL-3.0 license**. For more information please visit https://www.ultralytics.com.
+## Usage
 
-# Description
+Before using this script, it's important to understand the folder structures we're converting from and into.
+### File Structures
 
-The https://github.com/ultralytics/COCO2YOLO repo contains code to convert JSON datasets into YOLO (darknet) format. The code works on Linux, MacOS and Windows.
-
-# Requirements
-
-Python 3.8 or later with all [requirements.txt](https://github.com/ultralytics/JSON2YOLO/blob/master/requirements.txt) dependencies installed. To install run:
-```bash
-$ pip install -r requirements.txt
+#### COCO Format (Input)
+:heavy_exclamation_mark: Note that the `images` folder requires the `train` and `val` folders inside with the relevant images you exported.
+```
+├── <annotations-file>.json
+├── images
+    ├── train
+        ├── <image1>.jpg
+        ├── <image2>.jpg
+        └── <image3>.jpg
+    └── val
+        ├── <image4>.jpg
+        ├── <image5>.jpg
+        └── <image6>.jpg
 ```
 
-# Citation
+#### YOLO Format (Output)
 
-[![DOI](https://zenodo.org/badge/186122711.svg)](https://zenodo.org/badge/latestdoi/186122711)
+```
+├── <output-directory-name>
+    ├── <output-directory-name>.yaml
+    ├── images
+        ├── train
+            ├── <image1>.jpg
+            ├── <image2>.jpg
+            └── <image3>.jpg
+        └── val
+            ├── <image4>.jpg
+            ├── <image5>.jpg
+            └── <image6>.jpg
+    ├── labels
+        ├── train
+            ├── <image1>.txt
+            ├── <image2>.txt
+            └── <image3>.txt
+        └── val
+            ├── <image4>.txt
+            ├── <image5>.txt
+            └── <image6>.txt
+```
 
-## About Us
+### Example Usage
+Run [general_json2yolo.py](general_json2yolo.py) with the following arguments:
+```
+-j : (required) json directory
+-i : (required) images directory (with <images>/train and <images>/val)
+-o : (required) output directory
+-k : (optional) ids of classes to keep based on the list below
+-z : (optional) enables zipping of the folder for one less step so that you can upload it to ultralytics immediately
+```
+For example, running this below:
+```python
+python3 general_json2yolo.py -j "/home/samuel/x.json" -i "/home/samuel/images" -o /home/samuel/output -k 0 1 2 -z
+```
+:heavy_check_mark: chooses ids 0, 1, 2 based on the `yaml` detailing the label ids.
 
-Ultralytics is a U.S.-based particle physics and AI startup with over 6 years of expertise supporting government, academic and business clients. We offer a wide range of vision AI services, spanning from simple expert advice up to delivery of fully customized, end-to-end production solutions, including:
-- **Cloud-based AI** systems operating on **hundreds of HD video streams in realtime.**
-- **Edge AI** integrated into custom iOS and Android apps for realtime **30 FPS video inference.**
-- **Custom data training**, hyperparameter evolution, and model exportation to any destination.
-
-For business inquiries and professional support requests please visit us at https://www.ultralytics.com. 
-
-
-## Contact
-
-**Issues should be raised directly in the repository.** For business inquiries or professional support requests please visit https://www.ultralytics.com or email Glenn Jocher at glenn.jocher@ultralytics.com. 
+:heavy_check_mark: automatically zips the file for easy uploads to ultralytics.
