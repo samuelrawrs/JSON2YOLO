@@ -209,8 +209,12 @@ def convert_hasty_coco_json(
             ann for ann in data["annotations"] if ann["category_id"] in keep_classes_ids
         ]
 
+    id_mapping = {
+        category["id"]: new_id for new_id, category in enumerate(data["categories"])
+    }
+
     category_names = {
-        category["id"]: category["name"] for category in data["categories"]
+        id_mapping[category["id"]]: category["name"] for category in data["categories"]
     }
 
     # Create yaml file based on category names
@@ -245,7 +249,7 @@ def convert_hasty_coco_json(
             if box[2] <= 0 or box[3] <= 0:  # if w <= 0 and h <= 0
                 continue
 
-            cls = ann["category_id"] - 1
+            cls = id_mapping[ann["category_id"]]
 
             box = [cls] + box.tolist()
             if box not in bboxes:
@@ -315,9 +319,6 @@ def create_yaml_file(yaml_path, category_names):
         yaml.dump(yaml_content, file, sort_keys=False, default_flow_style=False)
 
 
-if __name__ == '__main__':
-    source = 'COCO'
-    source = 'hasty-coco'
 def create_zip_file(output_directory, remove_folder=False):
     # zip and remove the folder if indicated
     zip_file_path = Path(output_directory).with_suffix(".zip")
