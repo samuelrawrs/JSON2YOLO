@@ -1,11 +1,12 @@
 import argparse
 import json
 import subprocess
+from collections import defaultdict
 
 import cv2
 import yaml
-from collections import defaultdict
 from pycocotools import mask
+
 from utils import *
 
 
@@ -174,18 +175,19 @@ def convert_hasty_coco_json(
     json_file, images_dir="../coco/images/", output_dir="output_dir", keep_classes=None
 ):
     # Check for 'train' and 'val' subdirectories in the images directory
-    train_dir = Path(images_dir) / "train"
-    val_dir = Path(images_dir) / "val"
-    if not train_dir.exists() or not val_dir.exists():
+    source_train_dir = Path(images_dir) / "train"
+    source_val_dir = Path(images_dir) / "val"
+    if not source_train_dir.exists() or not source_val_dir.exists():
         raise ValueError(
-            "Both 'train' and 'val' directories must exist within the specified images directory."
+            "Both 'train' and 'val' directories must exist within the specified images"
+            f" directory. {images_dir=}"
         )
 
     # copying image files to ultralytics file structure
     save_dir = Path(output_dir)  # Base directory for labels
-    yolo_images = save_dir / "images"
-    copy_all_files(train_dir, yolo_images / "train")
-    copy_all_files(val_dir, yolo_images / "val")
+    dest_images_dir = save_dir / "images"
+    (Path(dest_images_dir) / "val").mkdir(parents=True, exist_ok=True)
+    (Path(dest_images_dir) / "train").mkdir(parents=True, exist_ok=True)
 
     # import json
     with open(json_file) as f:
@@ -237,6 +239,10 @@ def convert_hasty_coco_json(
 
         bboxes = []
         segments = []
+        if len(anns) == 0:
+            print(f"Image {f} has no annotations.")
+            continue
+
         for ann in anns:
             # The COCO box format is [top left x, top left y, width, height]
             if len(ann["bbox"]) == 0:
@@ -272,14 +278,19 @@ def convert_hasty_coco_json(
                 segments.append(s)
 
         # Determine if the image is in 'train' or 'val' directory
-        if (train_dir / f).exists():
+        if (source_train_dir / f).exists():
             label_subdir = "train"
-        elif (val_dir / f).exists():
+        elif (source_val_dir / f).exists():
             label_subdir = "val"
         else:
-            print(f"Image file {f} not found in 'train' or 'val' directories.")
+            print(f"Image file {f} not found in 'train' or 'val' directories."
+                  f" Train Path: {source_train_dir / f}, Val Path: {source_val_dir / f}")
             continue  # Skip this image
 
+        # Copy image file to destination directory
+        shutil.copy(images_dir / label_subdir / f, dest_images_dir / label_subdir / f)
+
+        # Create the label directory and make it
         fn = (
             save_dir / "labels" / label_subdir / f.split(".")[0]
         )  # Adjusted path for label file
@@ -330,15 +341,24 @@ def create_zip_file(output_directory, remove_folder=False):
 def main():
     parser = argparse.ArgumentParser(description="Convert Hasty COCO JSON files.")
     parser.add_argument(
-        "--json_file", "-j", required=True, help="Path to the JSON Annotation file."
+        "--json-file",
+        "-j",
+        type=Path,
+        required=True,
+        help="Path to the JSON Annotation file.",
     )
     parser.add_argument(
-        "--images_dir", "-i", required=True, help="Directory containing the images."
+        "--images-dir",
+        "-i",
+        type=Path,
+        required=True,
+        help="Directory containing the images.",
     )
     parser.add_argument(
-        "--output_dir",
+        "--output-dir",
         "-o",
         required=True,
+        type=Path,
         help="Output directory for the converted files.",
     )
 
