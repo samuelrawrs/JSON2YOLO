@@ -190,8 +190,8 @@ def convert_hasty_coco_json(
     (Path(dest_images_dir) / "train").mkdir(parents=True, exist_ok=True)
 
     # import json
-    with open(json_file) as f:
-        data = json.load(f)
+    with open(json_file) as image_file_name:
+        data = json.load(image_file_name)
 
     # keep certain classes if keep_classes is defined
     if keep_classes:
@@ -234,13 +234,13 @@ def convert_hasty_coco_json(
     # Write labels file
     for img_id, anns in tqdm(imgToAnns.items(), desc=f"Annotations {json_file}"):
         img = images["%g" % img_id]
-        h, w, f = img["height"], img["width"], img["file_name"]
-        f = f.split("/")[-1]
+        h, w, image_file_name = img["height"], img["width"], img["file_name"]
+        image_file_name = image_file_name.split("/")[-1]
 
         bboxes = []
         segments = []
         if len(anns) == 0:
-            print(f"Image {f} has no annotations.")
+            print(f"Image {image_file_name} has no annotations.")
             continue
 
         for ann in anns:
@@ -278,26 +278,27 @@ def convert_hasty_coco_json(
                 segments.append(s)
 
         # Determine if the image is in 'train' or 'val' directory
-        if (source_train_dir / f).exists():
+        if (source_train_dir / image_file_name).exists():
             label_subdir = "train"
-        elif (source_val_dir / f).exists():
+        elif (source_val_dir / image_file_name).exists():
             label_subdir = "val"
         else:
-            print(f"Image file {f} not found in 'train' or 'val' directories."
-                  f" Train Path: {source_train_dir / f}, Val Path: {source_val_dir / f}")
+            print(f"Image file {image_file_name} not found in 'train' or 'val' directories."
+                  f" Train Path: {source_train_dir / image_file_name}, Val Path: {source_val_dir / image_file_name}")
             continue  # Skip this image
 
         # Copy image file to destination directory
-        shutil.copy(images_dir / label_subdir / f, dest_images_dir / label_subdir / f)
+        shutil.copy(images_dir / label_subdir / image_file_name, dest_images_dir / label_subdir / image_file_name)
 
         # Create the label directory and make it
-        fn = (
-            save_dir / "labels" / label_subdir / f.split(".")[0]
+        label_file_path = (
+            save_dir / "labels" / label_subdir / image_file_name
         )  # Adjusted path for label file
-        fn.parent.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+        label_file_path = label_file_path.with_suffix(".txt")
+        label_file_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
 
         # Write annotations to file
-        with open(fn.with_suffix(".txt"), "a") as file:
+        with label_file_path.open("a") as file:
             for i in range(len(bboxes)):
                 line = (
                     *(segments[i] if len(segments[i]) > 0 else bboxes[i]),
